@@ -1,0 +1,10 @@
+
+\.idea/
+
+bin/
+
+cmake-build-debug/
+
+lib/
+
+include/
