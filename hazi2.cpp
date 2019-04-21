@@ -63,19 +63,40 @@ const char *fragmentSource = R"(
 		int rough, reflective;
 	};
 
+    struct Plane {
+        vec3 point;
+        vec3 normal;
+    };
+
     struct Ellipsoid {
 		vec3 center;
-		vec3 radius;
+		vec3 params;
 	};
 
 	const int nMaxEllipsoid = 10;
+    const int nMaxMirror = 100;
 
 	uniform vec3 wEye;
+    uniform Material materials[2]; // TODO
+
+    uniform Plane bottom;
+
+    uniform int mirrorMaterial;
+    uniform int nMirror;
+    uniform Plane mirrors[nMaxMirror];
+
 	uniform int nEllipsoid;
     uniform Ellipsoid ellipsoid[nMaxEllipsoid];
 
 	in  vec3 p;					// point on camera window corresponding to the pixel
 	out vec4 fragmentColor;		// output that goes to the raster memory as told by glBindFragDataLocation
+
+    vec3 Fresnel(vec3 F0, float cosTheta) {
+		return F0 + (vec3(1, 1, 1) - F0) * pow(cosTheta, 5);
+	}
+
+    const float epsilon = 0.0001f;
+	const int maxdepth = 5;
 
 	void main() {
 		fragmentColor = vec4(1, 0, 0, 1);
@@ -126,24 +147,51 @@ public:
 
 struct Ellipsoid {
     vec3 center;
-    float a, b, c;
+    const float a, b, c;
 
     Ellipsoid(const vec3& _center, float _a, float _b, float _c) :
         center(_center), a(_a), b(_b), c(_c) {
-
     }
 
     void SetUniform(unsigned int shaderProg, int o) {
         char buffer[256];
         sprintf(buffer, "ellipsoid[%d].center", o);
         center.SetUniform(shaderProg, buffer);
-        sprintf(buffer, "ellipsoid[%d].radius", o);
+        sprintf(buffer, "ellipsoid[%d].params", o);
         int location = glGetUniformLocation(shaderProg, buffer);
         if (location >= 0)
             glUniform3f(location, a, b, c);
         else
             printf("uniform %s cannot be set\n", buffer);
 
+    }
+};
+
+struct Plane {
+    vec3 point;
+    vec3 normal;
+
+    Plane(vec3 _point, vec3 _normal): point(_point), normal(_normal) {}
+
+    virtual void SetUniform(unsigned int shaderProg, int o) = 0;
+};
+
+struct Mirror : public Plane {
+    using Plane::Plane;
+    void SetUniform(unsigned int shaderProg, int o) override {
+        char buffer[256];
+        sprintf(buffer, "mirrors[%d].point", o);
+        point.SetUniform(shaderProg, buffer);
+        sprintf(buffer, "mirrors[%d].normal", o);
+        normal.SetUniform(shaderProg, buffer);
+    }
+};
+
+struct Bottom : public Plane {
+    using Plane::Plane;
+    virtual void SetUniform(unsigned int shaderProg, int o = 0) override {
+        point.SetUniform(shaderProg, "bottom.point");
+        normal.SetUniform(shaderProg, "bottom.normal");
     }
 };
 
@@ -178,7 +226,15 @@ public:
 };
 
 class Scene {
+    std::vector<Ellipsoid *> ellipsoids;
     Camera camera;
+    std::vector<Material *> materials;
+    Bottom *bottom;
+    std::vector<Mirror *> mirrors;
+    unsigned sides = 3;
+    static const unsigned maxSide = 100;
+    bool built = false;
+    bool mirrorChanged = true;
 public:
     void build() {
         vec3 eye = vec3(0, 0, 2);
@@ -186,13 +242,60 @@ public:
         vec3 lookat = vec3(0, 0, 0);
         float fov = 45 * M_PI / 180;
         camera.set(eye, lookat, vup, fov);
+
+        // add 4-5 ellipsoid
+
+        bottom = new Bottom({0, 0, 0}, {0, 0, 1});
+
+        // add mirrors
+        built = true;
     }
+
     void SetUniform(unsigned int shaderProg) {
         camera.SetUniform(shaderProg);
+
+        for (int i=0; i<ellipsoids.size(); ++i)
+            ellipsoids[i]->SetUniform(shaderProg, i);
+
+        //if (mirrorChanged) {
+            int location = glGetUniformLocation(shaderProg, "nMirrors");
+            if (location >= 0) glUniform1i(location, mirrors.size());
+            else printf("uniform nMirrors cannot be set\n");
+
+            for (int i=0; i<mirrors.size(); ++i)
+                mirrors[i]->SetUniform(shaderProg, i);
+            bottom->SetUniform(shaderProg);
+            mirrorChanged = false;
+        //}
+
+    }
+
+    void increaseMirror() {
+        if (sides < maxSide) {
+            sides++;
+            mirrorChanged = true;
+            // TODO add mirror, change the others
+        }
+    }
+
+    void changeMirrorMaterial(unsigned materialId){
+        // TODO change uniform
     }
 
     void Animate(float dt) {
 
+    }
+
+    ~Scene() {
+        if (built) {
+            for (auto & material: materials)
+                delete material;
+            for (auto & ellipsoid: ellipsoids)
+                delete ellipsoid;
+            for (auto & mirror: mirrors)
+                delete mirror;
+            delete bottom;
+        }
     }
 };
 
