@@ -99,7 +99,7 @@ const char *fragmentSource = R"(
 	const int maxdepth = 5;
 
 	void main() {
-		fragmentColor = vec4(1, 0, 0, 1);
+		fragmentColor = vec4(p.x, p.y, 0, 1);
 	}
 )";
 
@@ -225,6 +225,33 @@ public:
     }
 };
 
+struct Light {
+    vec3 direction;
+    vec3 Le, La;
+    Light(vec3 _direction, vec3 _Le, vec3 _La) {
+        direction = normalize(_direction);
+        Le = _Le; La = _La;
+    }
+    void SetUniform(unsigned int shaderProg) {
+        La.SetUniform(shaderProg, "light.La");
+        Le.SetUniform(shaderProg, "light.Le");
+        direction.SetUniform(shaderProg, "light.direction");
+    }
+};
+
+float rnd() { return (float)rand() / RAND_MAX; }
+
+// komlex számok alapján
+// http://cg.iit.bme.hu/portal/sites/default/files/oktatott%20t%C3%A1rgyak/sz%C3%A1m%C3%ADt%C3%B3g%C3%A9pes%20grafika/geometri%C3%A1k%20%C3%A9s%20algebr%C3%A1k/bmegeom.pdf
+vec2 forgatas(vec2 &point, float angle, vec2 &pivot) {
+    vec2 eltolt1 = point - pivot;
+    vec2 forgas(cosf(angle), sinf(angle));
+    return vec2(
+            eltolt1.x * forgas.x - eltolt1.y * forgas.y,
+            eltolt1.x * forgas.y + eltolt1.y * forgas.x
+    ) + pivot;
+}
+
 class Scene {
     std::vector<Ellipsoid *> ellipsoids;
     Camera camera;
@@ -245,9 +272,18 @@ public:
 
         // add 4-5 ellipsoid
 
-        bottom = new Bottom({0, 0, 0}, {0, 0, 1});
+        bottom = new Bottom({0, 0, -3}, {0, 0, 1});
 
-        // add mirrors
+        for (int i=0; i<sides; ++i){
+            vec2 point{0, 1}, origo{0, 0};
+            float angle = (float)i/sides * M_PI * 2;
+            point = forgatas(point, angle, origo);
+            mirrors.push_back(new Mirror(
+                    {point.x, point.y, 0},
+                    {-1*point.x, -1*point.y, 0}
+                    ));
+        }
+
         built = true;
     }
 
@@ -272,14 +308,32 @@ public:
 
     void increaseMirror() {
         if (sides < maxSide) {
-            sides++;
             mirrorChanged = true;
-            // TODO add mirror, change the others
+            sides++;
+            int i=0;
+            for (; i<sides-1; ++i){
+                vec2 point{0, 1}, origo{0, 0};
+                float angle = (float)i/sides * M_PI * 2;
+                point = forgatas(point, angle, origo);
+                *mirrors[i] = Mirror(
+                        {point.x, point.y, 0},
+                        {-1*point.x, -1*point.y, 0}
+                );
+            }
+            vec2 point{0, 1}, origo{0, 0};
+            float angle = (float)i/sides * M_PI * 2;
+            point = forgatas(point, angle, origo);
+            mirrors.push_back(new Mirror(
+                    {point.x, point.y, 0},
+                    {-1*point.x, -1*point.y, 0}
+            ));
         }
     }
 
-    void changeMirrorMaterial(unsigned materialId){
-        // TODO change uniform
+    void changeMirrorMaterial(unsigned int shaderProg, unsigned materialId){
+        int location = glGetUniformLocation(shaderProg, "mirrorMaterial");
+        if (location >= 0) glUniform1i(location, materialId);
+        else printf("uniform mirrorMaterial cannot be set\n");
     }
 
     void Animate(float dt) {
