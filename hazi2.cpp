@@ -63,14 +63,32 @@ const char *fragmentSource = R"(
 		int rough, reflective;
 	};
 
+    struct Light {
+		vec3 direction;
+		vec3 Le, La;
+	};
+
     struct Plane {
         vec3 point;
         vec3 normal;
+        Material mat;
     };
 
     struct Ellipsoid {
 		vec3 center;
 		vec3 params;
+        vec3 color;
+        Material mat;
+	};
+
+    struct Hit {
+		float t;
+		vec3 position, normal;
+		int mat;	// material index
+	};
+
+    struct Ray {
+		vec3 start, dir;
 	};
 
 	const int nMaxEllipsoid = 10;
@@ -91,6 +109,26 @@ const char *fragmentSource = R"(
 	in  vec3 p;					// point on camera window corresponding to the pixel
 	out vec4 fragmentColor;		// output that goes to the raster memory as told by glBindFragDataLocation
 
+    Hit intersect(const Plane object, const Ray ray) {
+        Hit hit;
+        hit.t = -1;
+        float D = dot(object.normal, object.point);
+        vec3 counter = D - dot(object.normal, ray.start);
+        vec3 div = dot(object.normal, ray.dir);
+        if (div == 0) return hit;
+        hit.t = counter / div;
+        hit.normal = object.normal;
+        hit.mat = object.mat;
+        hit.position = ray.start + ray.dir * hit.t;
+        return hit;
+    }
+
+    Hit intersect(const Ellipsoid object, const Ray ray) {
+        Hit hit;
+        hit.t = -1;
+        
+    }
+
     vec3 Fresnel(vec3 F0, float cosTheta) {
 		return F0 + (vec3(1, 1, 1) - F0) * pow(cosTheta, 5);
 	}
@@ -98,8 +136,17 @@ const char *fragmentSource = R"(
     const float epsilon = 0.0001f;
 	const int maxdepth = 5;
 
+    vec3 trace(Ray ray) {
+		vec3 weight = vec3(1, 1, 1);
+		vec3 outRadiance = vec3(0, 0, 0);
+        return outRadiance;
+	}
+
 	void main() {
-		fragmentColor = vec4(p.x, p.y, 0, 1);
+        Ray ray;
+		ray.start = wEye;
+		ray.dir = normalize(p - wEye);
+		fragmentColor = vec4(trace(ray), 1);
 	}
 )";
 
@@ -148,9 +195,10 @@ public:
 struct Ellipsoid {
     vec3 center;
     const float a, b, c;
+    vec3 color;
 
-    Ellipsoid(const vec3& _center, float _a, float _b, float _c) :
-        center(_center), a(_a), b(_b), c(_c) {
+    Ellipsoid(const vec3& _center, float _a, float _b, float _c, vec3 _color) :
+        center(_center), a(_a), b(_b), c(_c), color{_color} {
     }
 
     void SetUniform(unsigned int shaderProg, int o) {
@@ -163,7 +211,8 @@ struct Ellipsoid {
             glUniform3f(location, a, b, c);
         else
             printf("uniform %s cannot be set\n", buffer);
-
+        sprintf(buffer, "ellipsoid[%d].color", o);
+        color.SetUniform(shaderProg, buffer);
     }
 };
 
