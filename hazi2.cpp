@@ -36,6 +36,9 @@
 // based on:
 // http://cg.iit.bme.hu/portal/sites/default/files/oktatott%20t%C3%A1rgyak/sz%C3%A1m%C3%ADt%C3%B3g%C3%A9pes%20grafika/sug%C3%A1rk%C3%B6vet%C3%A9s/raytrace_0.cpp
 
+// vektorgrafikai alapok
+// https://cs.oberlin.edu/~bob/cs357.08/VectorGeometry/VectorGeometry.pdf
+
 // vertex shader in GLSL
 const char *vertexSource = R"(
 	#version 450
@@ -52,103 +55,9 @@ const char *vertexSource = R"(
 	}
 )";
 // fragment shader in GLSL
-const char *fragmentSource = R"(
-	#version 450
-    precision highp float;
-
-    struct Material {
-		vec3 ka, kd, ks;
-		float  shininess;
-		vec3 F0;
-		int rough, reflective;
-	};
-
-    struct Light {
-		vec3 direction;
-		vec3 Le, La;
-	};
-
-    struct Plane {
-        vec3 point;
-        vec3 normal;
-        Material mat;
-    };
-
-    struct Ellipsoid {
-		vec3 center;
-		vec3 params;
-        vec3 color;
-        Material mat;
-	};
-
-    struct Hit {
-		float t;
-		vec3 position, normal;
-		int mat;	// material index
-	};
-
-    struct Ray {
-		vec3 start, dir;
-	};
-
-	const int nMaxEllipsoid = 10;
-    const int nMaxMirror = 100;
-
-	uniform vec3 wEye;
-    uniform Material materials[2]; // TODO
-
-    uniform Plane bottom;
-
-    uniform int mirrorMaterial;
-    uniform int nMirror;
-    uniform Plane mirrors[nMaxMirror];
-
-	uniform int nEllipsoid;
-    uniform Ellipsoid ellipsoid[nMaxEllipsoid];
-
-	in  vec3 p;					// point on camera window corresponding to the pixel
-	out vec4 fragmentColor;		// output that goes to the raster memory as told by glBindFragDataLocation
-
-    Hit intersect(const Plane object, const Ray ray) {
-        Hit hit;
-        hit.t = -1;
-        float D = dot(object.normal, object.point);
-        vec3 counter = D - dot(object.normal, ray.start);
-        vec3 div = dot(object.normal, ray.dir);
-        if (div == 0) return hit;
-        hit.t = counter / div;
-        hit.normal = object.normal;
-        hit.mat = object.mat;
-        hit.position = ray.start + ray.dir * hit.t;
-        return hit;
-    }
-
-    Hit intersect(const Ellipsoid object, const Ray ray) {
-        Hit hit;
-        hit.t = -1;
-        
-    }
-
-    vec3 Fresnel(vec3 F0, float cosTheta) {
-		return F0 + (vec3(1, 1, 1) - F0) * pow(cosTheta, 5);
-	}
-
-    const float epsilon = 0.0001f;
-	const int maxdepth = 5;
-
-    vec3 trace(Ray ray) {
-		vec3 weight = vec3(1, 1, 1);
-		vec3 outRadiance = vec3(0, 0, 0);
-        return outRadiance;
-	}
-
-	void main() {
-        Ray ray;
-		ray.start = wEye;
-		ray.dir = normalize(p - wEye);
-		fragmentColor = vec4(trace(ray), 1);
-	}
-)";
+const char *fragmentSource =
+        #include "valami.glsl"
+                ;
 
 class Material {
 protected:
@@ -196,6 +105,7 @@ struct Ellipsoid {
     vec3 center;
     const float a, b, c;
     vec3 color;
+    int mat = 0;
 
     Ellipsoid(const vec3& _center, float _a, float _b, float _c, vec3 _color) :
         center(_center), a(_a), b(_b), c(_c), color{_color} {
@@ -213,12 +123,17 @@ struct Ellipsoid {
             printf("uniform %s cannot be set\n", buffer);
         sprintf(buffer, "ellipsoid[%d].color", o);
         color.SetUniform(shaderProg, buffer);
+        sprintf(buffer, "ellipsoid[%d].mat", o);
+        location = glGetUniformLocation(shaderProg, buffer);
+        if (location >= 0) glUniform1i(location, mat);
+        else printf("uniform ellipsoid mat cannot be set\n");
     }
 };
 
 struct Plane {
     vec3 point;
     vec3 normal;
+    int mat = 1;
 
     Plane(vec3 _point, vec3 _normal): point(_point), normal(_normal) {}
 
@@ -233,6 +148,10 @@ struct Mirror : public Plane {
         point.SetUniform(shaderProg, buffer);
         sprintf(buffer, "mirrors[%d].normal", o);
         normal.SetUniform(shaderProg, buffer);
+        sprintf(buffer, "mirrors[%d].mat", o);
+        int location = glGetUniformLocation(shaderProg, buffer);
+        if (location >= 0) glUniform1i(location, mat);
+        else printf("uniform mirror mat cannot be set\n");
     }
 };
 
@@ -241,6 +160,11 @@ struct Bottom : public Plane {
     virtual void SetUniform(unsigned int shaderProg, int o = 0) override {
         point.SetUniform(shaderProg, "bottom.point");
         normal.SetUniform(shaderProg, "bottom.normal");
+        char buffer[256];
+        sprintf(buffer, "bottom.mat", o);
+        int location = glGetUniformLocation(shaderProg, buffer);
+        if (location >= 0) glUniform1i(location, mat);
+        else printf("uniform bottom mat cannot be set\n");
     }
 };
 
@@ -305,6 +229,7 @@ class Scene {
     std::vector<Ellipsoid *> ellipsoids;
     Camera camera;
     std::vector<Material *> materials;
+    std::vector<Light *> lights;
     Bottom *bottom;
     std::vector<Mirror *> mirrors;
     unsigned sides = 3;
@@ -319,7 +244,17 @@ public:
         float fov = 45 * M_PI / 180;
         camera.set(eye, lookat, vup, fov);
 
+        lights.push_back(new Light(vec3(1, 1, 1), vec3(3, 3, 3), vec3(0.4, 0.3, 0.3)));
+
         // add 4-5 ellipsoid
+        for (int i=0; i<5; ++i) {
+            float a = rnd() * 0.2 + 0.05;
+            float b = rnd() * 0.2 + 0.05;
+            float c = rnd() * 0.2 + 0.05;
+            vec3 color = {1,0,0};
+            vec3 center = {rnd(), rnd(), -3 + c};
+            ellipsoids.push_back(new Ellipsoid(center, a, b, c, color));
+        }
 
         bottom = new Bottom({0, 0, -3}, {0, 0, 1});
 
@@ -333,26 +268,35 @@ public:
                     ));
         }
 
+        vec3 kd(0.3f, 0.2f, 0.1f), ks(10, 10, 10);
+        materials.push_back(new RoughMaterial(kd, ks, 50));
+        materials.push_back(new SmoothMaterial(vec3(0.9, 0.85, 0.8)));
+
         built = true;
     }
 
     void SetUniform(unsigned int shaderProg) {
         camera.SetUniform(shaderProg);
 
+        int location = glGetUniformLocation(shaderProg, "nEllipsoid");
+        if (location >= 0) glUniform1i(location, ellipsoids.size());
+        else printf("uniform nEllipsoid cannot be set\n");
         for (int i=0; i<ellipsoids.size(); ++i)
             ellipsoids[i]->SetUniform(shaderProg, i);
 
+        lights[0]->SetUniform(shaderProg);
+
         //if (mirrorChanged) {
-            int location = glGetUniformLocation(shaderProg, "nMirrors");
+            location = glGetUniformLocation(shaderProg, "nMirror");
             if (location >= 0) glUniform1i(location, mirrors.size());
-            else printf("uniform nMirrors cannot be set\n");
+            else printf("uniform nMirror cannot be set\n");
 
             for (int i=0; i<mirrors.size(); ++i)
                 mirrors[i]->SetUniform(shaderProg, i);
             bottom->SetUniform(shaderProg);
             mirrorChanged = false;
         //}
-
+        for (int mat = 0; mat < materials.size(); mat++) materials[mat]->SetUniform(shaderProg, mat);
     }
 
     void increaseMirror() {
