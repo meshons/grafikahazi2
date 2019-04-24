@@ -22,14 +22,13 @@ struct Plane {
 struct Ellipsoid {
     vec3 center;
     vec3 params;
-    vec3 color;
     int mat;
 };
 
 struct Hit {
     float t;
     vec3 position, normal;
-    int mat;	// material index
+    int mat;
 };
 
 struct Ray {
@@ -41,7 +40,7 @@ const int nMaxMirror = 100;
 
 uniform vec3 wEye;
 uniform Light light;
-uniform Material materials[2]; // TODO
+uniform Material materials[4];
 
 uniform Plane bottom;
 
@@ -63,7 +62,7 @@ Hit intersect(const Plane object, const Ray ray) {
     float div = dot(object.normal, ray.dir);
     if (div == 0) return hit;
     hit.t = counter / div;
-    hit.normal = object.normal;
+    hit.normal = normalize(object.normal);
     hit.mat = object.mat;
     hit.position = ray.start + ray.dir * hit.t;
     return hit;
@@ -90,12 +89,12 @@ Hit intersect(const Ellipsoid object, const Ray ray) {
     if (t1 <= 0) return hit;
     hit.t = (t2 > 0) ? t2 : t1;
     hit.position = ray.start + ray.dir * hit.t;
-    vec3 helper = hit.t - object.center;
-    hit.normal = 2.0 * vec3(
+    vec3 helper = hit.position - object.center;
+    hit.normal = normalize(2.0 * vec3(
         helper.x / object.params.x / object.params.x,
         helper.y / object.params.y / object.params.y,
         helper.z / object.params.z / object.params.z
-    );
+    ));
     hit.mat = object.mat;
     return hit;
 }
@@ -107,9 +106,8 @@ Hit firstIntersect(Ray ray) {
         Hit hit = intersect(mirrors[o], ray); //  hit.t < 0 if no intersection
         if (hit.t > 0 && (bestHit.t < 0 || hit.t < bestHit.t))  bestHit = hit;
     }
-    Hit hit = intersect(bottom, ray); //  hit.t < 0 if no intersection
-    if (hit.t > 0 && (bestHit.t < 0 || hit.t < bestHit.t))  bestHit = hit;
-
+    Hit hitBottom = intersect(bottom, ray); //  hit.t < 0 if no intersection
+    if (hitBottom.t > 0 && (bestHit.t < 0 || hitBottom.t < bestHit.t))  bestHit = hitBottom;
     for (int o = 0; o < nEllipsoid; o++) {
         Hit hit = intersect(ellipsoid[o], ray); //  hit.t < 0 if no intersection
         if (hit.t > 0 && (bestHit.t < 0 || hit.t < bestHit.t))  bestHit = hit;
@@ -128,7 +126,7 @@ vec3 Fresnel(vec3 F0, float cosTheta) {
 }
 
 const float epsilon = 0.0001f;
-const int maxdepth = 5;
+const int maxdepth = 15;
 
 vec3 trace(Ray ray) {
     vec3 weight = vec3(1, 1, 1);

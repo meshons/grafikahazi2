@@ -104,11 +104,10 @@ public:
 struct Ellipsoid {
     vec3 center;
     const float a, b, c;
-    vec3 color;
     int mat = 0;
 
-    Ellipsoid(const vec3& _center, float _a, float _b, float _c, vec3 _color) :
-        center(_center), a(_a), b(_b), c(_c), color{_color} {
+    Ellipsoid(const vec3& _center, float _a, float _b, float _c) :
+        center(_center), a(_a), b(_b), c(_c) {
     }
 
     void SetUniform(unsigned int shaderProg, int o) {
@@ -121,8 +120,6 @@ struct Ellipsoid {
             glUniform3f(location, a, b, c);
         else
             printf("uniform %s cannot be set\n", buffer);
-        sprintf(buffer, "ellipsoid[%d].color", o);
-        color.SetUniform(shaderProg, buffer);
         sprintf(buffer, "ellipsoid[%d].mat", o);
         location = glGetUniformLocation(shaderProg, buffer);
         if (location >= 0) glUniform1i(location, mat);
@@ -133,9 +130,11 @@ struct Ellipsoid {
 struct Plane {
     vec3 point;
     vec3 normal;
-    int mat = 1;
+    int mat = 2;
 
-    Plane(vec3 _point, vec3 _normal): point(_point), normal(_normal) {}
+    Plane(vec3 _point, vec3 _normal): point(_point), normal(_normal) {
+        normal = normalize(normal);
+    }
 
     virtual void SetUniform(unsigned int shaderProg, int o) = 0;
 };
@@ -163,7 +162,7 @@ struct Bottom : public Plane {
         char buffer[256];
         sprintf(buffer, "bottom.mat", o);
         int location = glGetUniformLocation(shaderProg, buffer);
-        if (location >= 0) glUniform1i(location, mat);
+        if (location >= 0) glUniform1i(location, 1);
         else printf("uniform bottom mat cannot be set\n");
     }
 };
@@ -238,23 +237,25 @@ class Scene {
     bool mirrorChanged = true;
 public:
     void build() {
-        vec3 eye = vec3(0, 0, 2);
+        vec3 eye = vec3(0, 0, 10);
         vec3 vup = vec3(0, 1, 0);
         vec3 lookat = vec3(0, 0, 0);
         float fov = 45 * M_PI / 180;
         camera.set(eye, lookat, vup, fov);
 
-        lights.push_back(new Light(vec3(1, 1, 1), vec3(3, 3, 3), vec3(0.4, 0.3, 0.3)));
+        lights.push_back(new Light(vec3(0, 0, 1), vec3(1, 1, 1), vec3(0.3, 0.3, 0.3)));
 
         // add 4-5 ellipsoid
-        for (int i=0; i<5; ++i) {
+        /*for (int i=0; i<1; ++i) {
             float a = rnd() * 0.2 + 0.05;
             float b = rnd() * 0.2 + 0.05;
             float c = rnd() * 0.2 + 0.05;
-            vec3 color = {1,0,0};
-            vec3 center = {rnd(), rnd(), -3 + c};
-            ellipsoids.push_back(new Ellipsoid(center, a, b, c, color));
-        }
+            vec3 center = {rnd() - 0.5f, rnd() - 0.5f, -3 + c};
+            ellipsoids.push_back(new Ellipsoid(center, a, b, c));
+        }*/
+        ellipsoids.push_back(new Ellipsoid(
+                vec3(0,0, -2.4f), 0.5f, 0.38f, 0.4f
+                ));
 
         bottom = new Bottom({0, 0, -3}, {0, 0, 1});
 
@@ -268,10 +269,13 @@ public:
                     ));
         }
 
-        vec3 kd(0.3f, 0.2f, 0.1f), ks(10, 10, 10);
-        materials.push_back(new RoughMaterial(kd, ks, 50));
-        materials.push_back(new SmoothMaterial(vec3(0.9, 0.85, 0.8)));
+        vec3 kd(0.3f, 0, 0), ks(1, 1, 1);
+        vec3 kd1(0, 0, 0), ks1(1, 1, 1);
 
+        materials.push_back(new RoughMaterial(kd, ks, 25));
+        materials.push_back(new RoughMaterial(kd1, ks1, 25));
+        materials.push_back(new SmoothMaterial(vec3(0.9, 0.9, 0.9)));
+        materials.push_back(new SmoothMaterial(vec3(0.5, 0.5, 0.5)));
         built = true;
     }
 
@@ -286,7 +290,7 @@ public:
 
         lights[0]->SetUniform(shaderProg);
 
-        //if (mirrorChanged) {
+        if (mirrorChanged) {
             location = glGetUniformLocation(shaderProg, "nMirror");
             if (location >= 0) glUniform1i(location, mirrors.size());
             else printf("uniform nMirror cannot be set\n");
@@ -295,7 +299,7 @@ public:
                 mirrors[i]->SetUniform(shaderProg, i);
             bottom->SetUniform(shaderProg);
             mirrorChanged = false;
-        //}
+        }
         for (int mat = 0; mat < materials.size(); mat++) materials[mat]->SetUniform(shaderProg, mat);
     }
 
@@ -407,7 +411,11 @@ void onKeyboard(unsigned char key, int pX, int pY) {
 
 // Key of ASCII code released
 void onKeyboardUp(unsigned char key, int pX, int pY) {
-
+    switch (key) {
+        case 'a':
+            scene.increaseMirror();
+            break;
+    }
 }
 
 // Mouse click event
