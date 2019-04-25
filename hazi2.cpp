@@ -101,6 +101,14 @@ public:
     }
 };
 
+float rnd() { return (float)rand() / RAND_MAX; }
+float randcoord() {
+    return (rnd() - 0.5f) * 0.09f;
+}
+vec3 randmove() {
+    return {randcoord(),randcoord(),0};
+}
+
 struct Ellipsoid {
     vec3 center;
     const float a, b, c;
@@ -124,6 +132,12 @@ struct Ellipsoid {
         location = glGetUniformLocation(shaderProg, buffer);
         if (location >= 0) glUniform1i(location, mat);
         else printf("uniform ellipsoid mat cannot be set\n");
+    }
+
+    void move() {
+        center = center + randmove();
+        if (length(vec2{center.x, center.y}) > 1.0f)
+            center = vec3{normalize(vec2{center.x, center.y}).x,normalize(vec2{center.x, center.y}).y, center.z};
     }
 };
 
@@ -211,8 +225,6 @@ struct Light {
     }
 };
 
-float rnd() { return (float)rand() / RAND_MAX; }
-
 // komlex számok alapján
 // http://cg.iit.bme.hu/portal/sites/default/files/oktatott%20t%C3%A1rgyak/sz%C3%A1m%C3%ADt%C3%B3g%C3%A9pes%20grafika/geometri%C3%A1k%20%C3%A9s%20algebr%C3%A1k/bmegeom.pdf
 vec2 forgatas(vec2 &point, float angle, vec2 &pivot) {
@@ -222,6 +234,12 @@ vec2 forgatas(vec2 &point, float angle, vec2 &pivot) {
             eltolt1.x * forgas.x - eltolt1.y * forgas.y,
             eltolt1.x * forgas.y + eltolt1.y * forgas.x
     ) + pivot;
+}
+
+float F0(float n, float k) {
+    float counter = (n-1)*(n-1) + k*k;
+    float div = (n+1)*(n+1) + k*k;
+    return counter / div;
 }
 
 class Scene {
@@ -243,21 +261,17 @@ public:
         float fov = 45 * M_PI / 180;
         camera.set(eye, lookat, vup, fov);
 
-        lights.push_back(new Light(vec3(0, 0, 1), vec3(1, 1, 1), vec3(0.3, 0.3, 0.3)));
+        lights.push_back(new Light(vec3(0, 0, 1), vec3(0.8, 0.8, 0.8), vec3(0.2, 0.2, 0.2)));
 
-        // add 4-5 ellipsoid
-        /*for (int i=0; i<1; ++i) {
-            float a = rnd() * 0.2 + 0.05;
-            float b = rnd() * 0.2 + 0.05;
-            float c = rnd() * 0.2 + 0.05;
-            vec3 center = {rnd() - 0.5f, rnd() - 0.5f, -3 + c};
+        for (int i=0; i<5; ++i) {
+            float a = rnd() * 0.05 + 0.15;
+            float b = rnd() * 0.05 + 0.15;
+            float c = rnd() * 0.05 + 0.15;
+            vec3 center = {rnd() - 0.5f, rnd() - 0.5f, -4.0f};
             ellipsoids.push_back(new Ellipsoid(center, a, b, c));
-        }*/
-        ellipsoids.push_back(new Ellipsoid(
-                vec3(0,0, -2.4f), 0.5f, 0.38f, 0.4f
-                ));
+        }
 
-        bottom = new Bottom({0, 0, -3}, {0, 0, 1});
+        bottom = new Bottom({0, 0, -5}, {0, 0, 1});
 
         for (int i=0; i<sides; ++i){
             vec2 point{0, 1}, origo{0, 0};
@@ -269,29 +283,32 @@ public:
                     ));
         }
 
-        vec3 kd(0.3f, 0, 0), ks(1, 1, 1);
-        vec3 kd1(0, 0, 0), ks1(1, 1, 1);
+        vec3 kd(1, 0, 0), ks(1, 1, 1);
+        vec3 kd1(0.6, 0.6, 0.6), ks1(0, 0, 0);
 
         materials.push_back(new RoughMaterial(kd, ks, 25));
-        materials.push_back(new RoughMaterial(kd1, ks1, 25));
-        materials.push_back(new SmoothMaterial(vec3(0.9, 0.9, 0.9)));
-        materials.push_back(new SmoothMaterial(vec3(0.5, 0.5, 0.5)));
+        materials.push_back(new RoughMaterial(kd1, ks1, 0));
+        materials.push_back(new SmoothMaterial(vec3(F0(0.17, 3.1), F0(0.35,2.7), F0(1.5,1.9))));
+        materials.push_back(new SmoothMaterial(vec3(F0(0.14,4.1), F0(0.16,2.3), F0(0.13,3.1))));
         built = true;
     }
 
-    void SetUniform(unsigned int shaderProg) {
+    void firstSetUniform(unsigned int shaderProg) {
         camera.SetUniform(shaderProg);
-
         int location = glGetUniformLocation(shaderProg, "nEllipsoid");
         if (location >= 0) glUniform1i(location, ellipsoids.size());
         else printf("uniform nEllipsoid cannot be set\n");
+        for (int mat = 0; mat < materials.size(); mat++) materials[mat]->SetUniform(shaderProg, mat);
+        lights[0]->SetUniform(shaderProg);
+    }
+
+    void SetUniform(unsigned int shaderProg) {
+
         for (int i=0; i<ellipsoids.size(); ++i)
             ellipsoids[i]->SetUniform(shaderProg, i);
 
-        lights[0]->SetUniform(shaderProg);
-
         if (mirrorChanged) {
-            location = glGetUniformLocation(shaderProg, "nMirror");
+            int location = glGetUniformLocation(shaderProg, "nMirror");
             if (location >= 0) glUniform1i(location, mirrors.size());
             else printf("uniform nMirror cannot be set\n");
 
@@ -300,7 +317,6 @@ public:
             bottom->SetUniform(shaderProg);
             mirrorChanged = false;
         }
-        for (int mat = 0; mat < materials.size(); mat++) materials[mat]->SetUniform(shaderProg, mat);
     }
 
     void increaseMirror() {
@@ -327,14 +343,16 @@ public:
         }
     }
 
-    void changeMirrorMaterial(unsigned int shaderProg, unsigned materialId){
-        int location = glGetUniformLocation(shaderProg, "mirrorMaterial");
-        if (location >= 0) glUniform1i(location, materialId);
-        else printf("uniform mirrorMaterial cannot be set\n");
+    void changeMirrorMaterial(int shaderProg, unsigned materialId){
+        for (auto & mirror : mirrors) {
+            mirror->mat = materialId;
+        }
+        mirrorChanged=true;
     }
 
-    void Animate(float dt) {
-
+    void Animate() {
+        for (auto & ellipsoid: ellipsoids)
+            ellipsoid->move();
     }
 
     ~Scene() {
@@ -385,9 +403,9 @@ void onInitialization() {
     scene.build();
     fullScreenTexturedQuad.Create();
 
-    // create program for the GPU
     gpuProgram.Create(vertexSource, fragmentSource, "fragmentColor");
     gpuProgram.Use();
+    scene.firstSetUniform(gpuProgram.getId());
 }
 
 // Window has become invalid: Redraw
@@ -415,6 +433,12 @@ void onKeyboardUp(unsigned char key, int pX, int pY) {
         case 'a':
             scene.increaseMirror();
             break;
+        case 'g':
+            scene.changeMirrorMaterial(gpuProgram.getId(), 2);
+            break;
+        case 's':
+            scene.changeMirrorMaterial(gpuProgram.getId(), 3);
+            break;
     }
 }
 
@@ -428,6 +452,6 @@ void onMouseMotion(int pX, int pY) {
 
 // Idle event indicating that some time elapsed: do animation here
 void onIdle() {
-    scene.Animate(0.01);
+    scene.Animate();
     glutPostRedisplay();
 }

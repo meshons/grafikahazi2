@@ -44,7 +44,6 @@ uniform Material materials[4];
 
 uniform Plane bottom;
 
-uniform int mirrorMaterial;
 uniform int nMirror;
 uniform Plane mirrors[nMaxMirror];
 
@@ -126,7 +125,7 @@ vec3 Fresnel(vec3 F0, float cosTheta) {
 }
 
 const float epsilon = 0.0001f;
-const int maxdepth = 15;
+const int maxdepth = 8;
 
 vec3 trace(Ray ray) {
     vec3 weight = vec3(1, 1, 1);
